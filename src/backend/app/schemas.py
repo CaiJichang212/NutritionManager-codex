@@ -77,6 +77,16 @@ class GoalUpdate(BaseModel):
     weekly_target: Optional[float] = None
 
 
+class PasswordUpdate(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class BindContactRequest(BaseModel):
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+
 class FoodOut(BaseModel):
     id: int
     name: str
@@ -114,6 +124,10 @@ class RecordItemCreate(BaseModel):
     amount: float
 
 
+class RecordItemUpdate(BaseModel):
+    amount: float
+
+
 class RecordCreate(BaseModel):
     date: Optional[date] = None
     meal_type: str
@@ -122,6 +136,8 @@ class RecordCreate(BaseModel):
 
 class RecordFood(BaseModel):
     id: int
+    record_id: Optional[int] = None
+    record_item_id: Optional[int] = None
     name: str
     amount: str
     calories: float
