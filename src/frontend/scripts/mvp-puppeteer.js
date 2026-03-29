@@ -1,6 +1,6 @@
 import puppeteer from "puppeteer";
 
-const BASE_URL = process.env.BASE_URL || "http://localhost:5173";
+const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:5173";
 
 async function run() {
   const browser = await puppeteer.launch({ headless: "new" });
@@ -53,7 +53,7 @@ async function run() {
   const waitText = async (text) => {
     await page.waitForFunction(
       (s) => document.body && document.body.innerText.includes(s),
-      { timeout: 10000 },
+      { timeout: 15000 },
       text,
     );
   };
@@ -106,13 +106,19 @@ async function run() {
     await page.goto(`${BASE_URL}/record`, { waitUntil: "domcontentloaded" });
     const snapshot = await page.evaluate(() => document.body?.innerText?.slice(0, 120) || "");
     console.log(`[INFO] /record 页面摘要: ${snapshot.replace(/\n+/g, " ")}`);
-    await page.waitForSelector('input[placeholder="搜索食物名称、品牌..."]');
-    await page.click('input[placeholder="搜索食物名称、品牌..."]', { clickCount: 3 });
-    await page.type('input[placeholder="搜索食物名称、品牌..."]', "鸡胸肉");
+    await page.waitForSelector('[data-testid="food-search-input"]', { timeout: 15000 });
+    await page.click('[data-testid="food-search-input"]', { clickCount: 3 });
+    await page.type('[data-testid="food-search-input"]', "鸡胸肉");
     await sleep(800);
-    await clickByText("div", "鸡胸肉");
-    await waitText("食物详情");
-    await clickByText("button", "添加到");
+    await page.waitForSelector('[data-testid^="food-result-"]', { timeout: 15000 });
+    await page.click('[data-testid^="food-result-"]');
+    await page.waitForSelector('[data-testid="add-food-button"]', { timeout: 15000 });
+    const addReq = page.waitForResponse(
+      (res) => res.url().includes("/api/records") && res.status() === 200,
+      { timeout: 15000 },
+    );
+    await page.click('[data-testid="add-food-button"]');
+    await addReq;
     await sleep(500);
     record("搜索食物并添加记录", true);
   } catch (err) {

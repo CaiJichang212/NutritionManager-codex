@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from "react-router";
+import { Navigate, Outlet, NavLink, useLocation } from "react-router";
 import { useState } from "react";
 import {
   LayoutDashboard,
@@ -16,6 +16,7 @@ import {
   Settings,
   Leaf,
 } from "lucide-react";
+import { hasToken } from "./lib/api";
 
 const navItems = [
   { to: "/", label: "首页", icon: LayoutDashboard, end: true },
@@ -36,6 +37,10 @@ const bottomNavItems = [
 ];
 
 export function Root() {
+  if (!hasToken()) {
+    return <Navigate to="/login" replace />;
+  }
+
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();

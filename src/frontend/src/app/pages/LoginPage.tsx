@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Leaf, Phone, Mail, Eye, EyeOff, ChevronRight, Check } from "lucide-react";
-import { login, register } from "../lib/api";
+import { hasToken, login, register } from "../lib/api";
 
 type Step = "login" | "register-info" | "register-goal";
 
@@ -33,6 +33,12 @@ export function LoginPage() {
   const [weeklyTarget, setWeeklyTarget] = useState(0.5);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (hasToken()) {
+      navigate("/", { replace: true });
+    }
+  }, [navigate]);
 
   const handleLogin = async () => {
     setError(null);

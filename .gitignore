@@ -1,5 +1,5 @@
-# src/backend/
-# src/frontend/
+# lzc
+output
 .npm-cache
 
 # Python

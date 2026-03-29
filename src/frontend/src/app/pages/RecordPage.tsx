@@ -209,6 +209,7 @@ function FoodDetailModal({ food, onClose, onAdd }: {
               <Star size={16} /> 收藏
             </button>
             <button
+              data-testid="add-food-button"
               onClick={() => onAdd(amount, meal)}
               className="flex-2 flex-grow py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-colors shadow-lg shadow-green-200"
             >
@@ -384,6 +385,7 @@ export function RecordPage() {
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
+              data-testid="food-search-input"
               type="text"
               value={query}
               onChange={(e) => handleSearch(e.target.value)}
@@ -420,6 +422,7 @@ export function RecordPage() {
             {filteredResults.map((food) => (
               <div
                 key={food.id}
+                data-testid={`food-result-${food.id}`}
                 onClick={() => setSelectedFood(food)}
                 className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-3 cursor-pointer hover:border-green-300 hover:shadow-md transition-all"
               >
