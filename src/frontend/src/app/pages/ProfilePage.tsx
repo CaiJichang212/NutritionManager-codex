@@ -15,7 +15,7 @@ import {
   Check,
   Camera,
 } from "lucide-react";
-import { getMe, updateMe } from "../lib/api";
+import { getMe, updateGoal, updateMe } from "../lib/api";
 
 const defaultUser = {
   name: "李明",
@@ -29,6 +29,7 @@ const defaultUser = {
   targetWeight: 65,
   activity: "中度活动",
   goal: "减脂",
+  weeklyTarget: 0.5,
   bmi: 23.5,
   bmr: 1756,
   tdee: 2370,
@@ -71,11 +72,17 @@ function SectionItem({
 }
 
 export function ProfilePage() {
-  const [editing, setEditing] = useState(false);
+  const [profileEditing, setProfileEditing] = useState(false);
+  const [bodyEditing, setBodyEditing] = useState(false);
   const [activeSection, setActiveSection] = useState<Section | null>(null);
   const [userInfo, setUserInfo] = useState(defaultUser);
+  const [displayName, setDisplayName] = useState(defaultUser.name);
+  const [initialWeight, setInitialWeight] = useState(defaultUser.weight);
+  const [height, setHeight] = useState(defaultUser.height);
   const [weight, setWeight] = useState(defaultUser.weight);
-  const bmi = (weight / ((userInfo.height / 100) ** 2)).toFixed(1);
+  const [targetWeight, setTargetWeight] = useState(defaultUser.targetWeight);
+  const [bodyError, setBodyError] = useState<string | null>(null);
+  const bmi = (weight / ((height / 100) ** 2)).toFixed(1);
 
   useEffect(() => {
     let active = true;
@@ -94,13 +101,18 @@ export function ProfilePage() {
           targetWeight: data.target_weight || defaultUser.targetWeight,
           activity: data.activity_level || defaultUser.activity,
           goal: data.goal_type || defaultUser.goal,
+          weeklyTarget: data.weekly_target || defaultUser.weeklyTarget,
           bmi: data.bmi || defaultUser.bmi,
           bmr: data.bmr || defaultUser.bmr,
           tdee: data.tdee || defaultUser.tdee,
           dailyCalGoal: data.daily_calorie_goal || defaultUser.dailyCalGoal,
         };
         setUserInfo(mapped);
+        setDisplayName(mapped.name);
+        setInitialWeight(mapped.weight);
+        setHeight(mapped.height);
         setWeight(mapped.weight);
+        setTargetWeight(mapped.targetWeight);
       })
       .catch(() => {});
     return () => {
@@ -109,7 +121,15 @@ export function ProfilePage() {
   }, []);
 
   const bmiCategory = Number(bmi) < 18.5 ? "偏轻" : Number(bmi) < 24 ? "正常" : Number(bmi) < 28 ? "超重" : "肥胖";
-  const bmiColor = Number(bmi) < 18.5 ? "text-blue-500" : Number(bmi) < 24 ? "text-green-600" : Number(bmi) < 28 ? "text-yellow-600" : "text-red-500";
+  const weeklyTarget = Math.max(Number(userInfo.weeklyTarget) || 0.5, 0.1);
+  const isLoseGoal = targetWeight < initialWeight;
+  const isGainGoal = targetWeight > initialWeight;
+  const goalVerb = isLoseGoal ? "减重" : isGainGoal ? "增重" : "体重维持";
+  const totalGoalKg = Math.max(Math.abs(targetWeight - initialWeight), 0);
+  const rawProgressKg = isLoseGoal ? initialWeight - weight : isGainGoal ? weight - initialWeight : 0;
+  const progressKg = Math.max(rawProgressKg, 0);
+  const completionPct = totalGoalKg > 0 ? Math.min((progressKg / totalGoalKg) * 100, 100) : 100;
+  const etaWeeks = totalGoalKg > 0 ? Math.ceil((totalGoalKg - progressKg) / weeklyTarget) : 0;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
@@ -128,9 +148,27 @@ export function ProfilePage() {
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-white text-xl font-bold">{userInfo.name}</h2>
+              {profileEditing ? (
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="bg-white/20 text-white text-xl font-bold rounded-lg px-2 py-0.5 outline-none placeholder:text-green-100"
+                  placeholder="输入昵称"
+                />
+              ) : (
+                <h2 className="text-white text-xl font-bold">{displayName}</h2>
+              )}
               <button
-                onClick={() => setEditing(!editing)}
+                onClick={async () => {
+                  if (profileEditing) {
+                    try {
+                      const data: any = await updateMe({ nickname: displayName });
+                      setDisplayName(data.nickname || displayName);
+                    } catch {}
+                  }
+                  setProfileEditing(!profileEditing);
+                }}
                 className="p-1 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
               >
                 <Edit2 size={12} className="text-white" />
@@ -160,35 +198,80 @@ export function ProfilePage() {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-gray-700">身体数据</h3>
           <button
-            onClick={() => {
-              if (editing) {
-                updateMe({ weight }).then((data: any) => {
-                  setUserInfo((prev) => ({ ...prev, weight: data.weight, bmi: data.bmi, bmr: data.bmr, tdee: data.tdee, dailyCalGoal: data.daily_calorie_goal }));
-                });
+            onClick={async () => {
+              if (!bodyEditing) {
+                setBodyError(null);
+                setBodyEditing(true);
+                return;
               }
-              setEditing(!editing);
+              if (!Number.isFinite(height) || height <= 0) {
+                setBodyError("身高必须是大于 0 的数字");
+                return;
+              }
+              if (!Number.isFinite(weight) || weight < 0) {
+                setBodyError("体重必须是非负数字");
+                return;
+              }
+              if (!Number.isFinite(targetWeight) || targetWeight < 0) {
+                setBodyError("目标体重必须是非负数字");
+                return;
+              }
+              try {
+                const [meData, goalData]: any = await Promise.all([
+                  updateMe({ height, weight }),
+                  updateGoal({ target_weight: targetWeight }),
+                ]);
+                setUserInfo((prev) => ({
+                  ...prev,
+                  name: displayName,
+                  height: meData.height,
+                  weight: meData.weight,
+                  targetWeight: goalData.target_weight,
+                  weeklyTarget: goalData.weekly_target ?? prev.weeklyTarget,
+                  bmi: meData.bmi,
+                  bmr: meData.bmr,
+                  tdee: meData.tdee,
+                  dailyCalGoal: meData.daily_calorie_goal,
+                }));
+                setHeight(meData.height);
+                setWeight(meData.weight);
+                setTargetWeight(goalData.target_weight);
+                setBodyError(null);
+                setBodyEditing(false);
+              } catch {
+                setBodyError("保存失败，请稍后重试");
+              }
             }}
             className="text-sm text-green-600 flex items-center gap-1 hover:text-green-700"
           >
-            <Edit2 size={12} /> {editing ? "保存" : "编辑"}
+            <Edit2 size={12} /> {bodyEditing ? "保存" : "编辑"}
           </button>
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: "身高", value: `${userInfo.height}`, unit: "cm", icon: Ruler, color: "bg-blue-50 text-blue-600" },
-            { label: "体重", value: `${weight}`, unit: "kg", icon: Scale, color: "bg-green-50 text-green-600", editable: true },
-            { label: "BMI", value: bmi, unit: bmiCategory, icon: Activity, color: "bg-yellow-50 text-yellow-600" },
-            { label: "目标体重", value: `${userInfo.targetWeight}`, unit: "kg", icon: Target, color: "bg-purple-50 text-purple-600" },
+            { label: "身高", value: `${height}`, unit: "cm", icon: Ruler, color: "bg-blue-50 text-blue-600", field: "height", editable: true },
+            { label: "体重", value: `${weight}`, unit: "kg", icon: Scale, color: "bg-green-50 text-green-600", field: "weight", editable: true },
+            { label: "BMI", value: bmi, unit: bmiCategory, icon: Activity, color: "bg-yellow-50 text-yellow-600", field: "bmi", editable: false },
+            { label: "目标体重", value: `${targetWeight}`, unit: "kg", icon: Target, color: "bg-purple-50 text-purple-600", field: "targetWeight", editable: true },
           ].map((item) => (
             <div key={item.label} className="text-center">
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-2 ${item.color.split(" ")[0]}`}>
                 <item.icon size={20} className={item.color.split(" ")[1]} />
               </div>
-              {item.editable && editing ? (
+              {item.editable && bodyEditing ? (
                 <input
-                  type="number"
-                  value={weight}
-                  onChange={(e) => setWeight(Number(e.target.value))}
+                  type="text"
+                  inputMode="decimal"
+                  pattern="^\\d*(\\.\\d+)?$"
+                  value={item.field === "height" ? height : item.field === "weight" ? weight : targetWeight}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+                    const next = raw === "" ? 0 : Number(raw);
+                    if (item.field === "height") setHeight(next);
+                    if (item.field === "weight") setWeight(next);
+                    if (item.field === "targetWeight") setTargetWeight(next);
+                  }}
                   className="w-full text-center text-lg font-bold text-gray-800 border border-green-300 rounded-lg py-0.5 outline-none"
                 />
               ) : (
@@ -198,6 +281,7 @@ export function ProfilePage() {
             </div>
           ))}
         </div>
+        {bodyError && <div className="mt-3 text-sm text-red-500">{bodyError}</div>}
 
         {/* Calculated Values */}
         <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-3">
@@ -224,10 +308,10 @@ export function ProfilePage() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           {[
-            { label: "目标类型", value: "减脂", icon: "🔥", active: true },
-            { label: "减脂速度", value: "0.5 kg/周", icon: "📉", active: false },
-            { label: "当前进度", value: `-3.2 kg`, icon: "✅", active: false },
-            { label: "预计完成", value: "约14周", icon: "📅", active: false },
+            { label: "目标类型", value: userInfo.goal, icon: "🔥", active: true },
+            { label: "目标速度", value: `${weeklyTarget} kg/周`, icon: "📉", active: false },
+            { label: "当前进度", value: `${isLoseGoal ? "-" : isGainGoal ? "+" : ""}${progressKg.toFixed(1)} kg`, icon: "✅", active: false },
+            { label: "预计完成", value: totalGoalKg <= 0 ? "已达目标" : `约${Math.max(etaWeeks, 0)}周`, icon: "📅", active: false },
           ].map((item) => (
             <div key={item.label} className={`p-3 rounded-xl border ${item.active ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-100"}`}>
               <div className="text-lg mb-1">{item.icon}</div>
@@ -238,10 +322,11 @@ export function ProfilePage() {
         </div>
         <div className="mt-4 p-3 bg-green-50 rounded-xl">
           <div className="text-sm text-green-700">
-            <span className="font-medium">进度：</span>减重 3.2 kg（目标 7 kg），完成度 46%
+            <span className="font-medium">进度：</span>
+            {goalVerb} {progressKg.toFixed(1)} kg（目标 {totalGoalKg.toFixed(1)} kg），完成度 {Math.round(completionPct)}%
           </div>
           <div className="h-2 bg-green-100 rounded-full mt-2 overflow-hidden">
-            <div className="h-full bg-green-500 rounded-full" style={{ width: "46%" }} />
+            <div className="h-full bg-green-500 rounded-full" style={{ width: `${completionPct}%` }} />
           </div>
         </div>
       </div>
