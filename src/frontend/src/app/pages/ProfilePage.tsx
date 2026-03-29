@@ -15,7 +15,7 @@ import {
   Check,
   Camera,
 } from "lucide-react";
-import { getMe, updateGoal, updateMe } from "../lib/api";
+import { bindContact, getMe, updateGoal, updateMe, updatePassword } from "../lib/api";
 
 const defaultUser = {
   name: "李明",
@@ -82,6 +82,26 @@ export function ProfilePage() {
   const [weight, setWeight] = useState(defaultUser.weight);
   const [targetWeight, setTargetWeight] = useState(defaultUser.targetWeight);
   const [bodyError, setBodyError] = useState<string | null>(null);
+  const [bindPhone, setBindPhone] = useState("");
+  const [bindEmail, setBindEmail] = useState("");
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [securityMsg, setSecurityMsg] = useState<string | null>(null);
+  const [securityErr, setSecurityErr] = useState<string | null>(null);
+  const [healthEditing, setHealthEditing] = useState(false);
+  const [activityLevel, setActivityLevel] = useState(defaultUser.activity);
+  const [healthConditionsText, setHealthConditionsText] = useState(healthConditions.join("、"));
+  const [allergiesText, setAllergiesText] = useState(allergies.join("、"));
+  const [healthMsg, setHealthMsg] = useState<string | null>(null);
+  const [healthErr, setHealthErr] = useState<string | null>(null);
+  const [goalEditing, setGoalEditing] = useState(false);
+  const [goalTypeEdit, setGoalTypeEdit] = useState(defaultUser.goal);
+  const [weeklyTargetEdit, setWeeklyTargetEdit] = useState(defaultUser.weeklyTarget);
+  const [goalTargetInput, setGoalTargetInput] = useState(String(defaultUser.targetWeight));
+  const [goalWeeklyInput, setGoalWeeklyInput] = useState(String(defaultUser.weeklyTarget));
+  const [goalMsg, setGoalMsg] = useState<string | null>(null);
+  const [goalErr, setGoalErr] = useState<string | null>(null);
   const bmi = (weight / ((height / 100) ** 2)).toFixed(1);
 
   useEffect(() => {
@@ -113,6 +133,15 @@ export function ProfilePage() {
         setHeight(mapped.height);
         setWeight(mapped.weight);
         setTargetWeight(mapped.targetWeight);
+        setBindPhone(data.phone || "");
+        setBindEmail(data.email || "");
+        setActivityLevel(data.activity_level || defaultUser.activity);
+        setHealthConditionsText((data.health_conditions || healthConditions).join("、"));
+        setAllergiesText((data.allergies || allergies).join("、"));
+        setGoalTypeEdit(data.goal_type || defaultUser.goal);
+        setWeeklyTargetEdit(data.weekly_target || defaultUser.weeklyTarget);
+        setGoalTargetInput(String(data.target_weight || defaultUser.targetWeight));
+        setGoalWeeklyInput(String(data.weekly_target || defaultUser.weeklyTarget));
       })
       .catch(() => {});
     return () => {
@@ -304,12 +333,102 @@ export function ProfilePage() {
           <h3 className="text-gray-700 flex items-center gap-2">
             <Target size={16} className="text-green-500" /> 健康目标
           </h3>
-          <button className="text-sm text-green-600 hover:text-green-700">修改</button>
+          <button
+            onClick={async () => {
+              if (!goalEditing) {
+                setGoalErr(null);
+                setGoalMsg(null);
+                setGoalTargetInput(String(targetWeight));
+                setGoalWeeklyInput(String(weeklyTarget));
+                setGoalEditing(true);
+                return;
+              }
+              const parsedTarget = Number(goalTargetInput.trim() || "0");
+              const parsedWeekly = Number(goalWeeklyInput.trim() || "0");
+              if (!Number.isFinite(parsedTarget) || parsedTarget < 0) {
+                setGoalErr("目标体重必须是非负数字");
+                return;
+              }
+              if (!Number.isFinite(parsedWeekly) || parsedWeekly <= 0) {
+                setGoalErr("周目标必须大于0");
+                return;
+              }
+              try {
+                const data: any = await updateGoal({
+                  goal_type: goalTypeEdit,
+                  target_weight: parsedTarget,
+                  weekly_target: parsedWeekly,
+                });
+                setUserInfo((prev) => ({
+                  ...prev,
+                  goal: data.goal_type || prev.goal,
+                  targetWeight: data.target_weight ?? prev.targetWeight,
+                  weeklyTarget: data.weekly_target ?? prev.weeklyTarget,
+                  bmi: data.bmi ?? prev.bmi,
+                  bmr: data.bmr ?? prev.bmr,
+                  tdee: data.tdee ?? prev.tdee,
+                  dailyCalGoal: data.daily_calorie_goal ?? prev.dailyCalGoal,
+                }));
+                setTargetWeight(data.target_weight ?? parsedTarget);
+                setGoalTypeEdit(data.goal_type || goalTypeEdit);
+                setWeeklyTargetEdit(data.weekly_target ?? parsedWeekly);
+                setGoalTargetInput(String(data.target_weight ?? parsedTarget));
+                setGoalWeeklyInput(String(data.weekly_target ?? parsedWeekly));
+                setGoalErr(null);
+                setGoalMsg("健康目标已保存");
+                setGoalEditing(false);
+              } catch (e: any) {
+                setGoalErr(String(e?.message || "健康目标保存失败"));
+              }
+            }}
+            className="text-sm text-green-600 hover:text-green-700"
+          >
+            {goalEditing ? "保存" : "修改"}
+          </button>
         </div>
+        {goalEditing && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+            <select
+              value={goalTypeEdit}
+              onChange={(e) => setGoalTypeEdit(e.target.value)}
+              className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+            >
+              {["减脂", "增肌", "健康管理", "维持"].map((goal) => (
+                <option key={goal} value={goal}>
+                  {goal}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={goalTargetInput}
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+                setGoalTargetInput(raw);
+              }}
+              placeholder="目标体重(kg)"
+              className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={goalWeeklyInput}
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+                setGoalWeeklyInput(raw);
+              }}
+              placeholder="周目标(kg/周)"
+              className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+            />
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           {[
-            { label: "目标类型", value: userInfo.goal, icon: "🔥", active: true },
-            { label: "目标速度", value: `${weeklyTarget} kg/周`, icon: "📉", active: false },
+            { label: "目标类型", value: goalEditing ? goalTypeEdit : userInfo.goal, icon: "🔥", active: true },
+            { label: "目标速度", value: `${goalEditing ? weeklyTargetEdit : weeklyTarget} kg/周`, icon: "📉", active: false },
             { label: "当前进度", value: `${isLoseGoal ? "-" : isGainGoal ? "+" : ""}${progressKg.toFixed(1)} kg`, icon: "✅", active: false },
             { label: "预计完成", value: totalGoalKg <= 0 ? "已达目标" : `约${Math.max(etaWeeks, 0)}周`, icon: "📅", active: false },
           ].map((item) => (
@@ -329,38 +448,113 @@ export function ProfilePage() {
             <div className="h-full bg-green-500 rounded-full" style={{ width: `${completionPct}%` }} />
           </div>
         </div>
+        {goalMsg && <div className="mt-3 text-sm text-green-600">{goalMsg}</div>}
+        {goalErr && <div className="mt-3 text-sm text-red-500">{goalErr}</div>}
       </div>
 
       {/* Health Info */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-        <h3 className="text-gray-700 mb-4 flex items-center gap-2">
-          <Heart size={16} className="text-red-400" /> 健康信息
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-gray-700 flex items-center gap-2">
+            <Heart size={16} className="text-red-400" /> 健康信息
+          </h3>
+          <button
+            onClick={async () => {
+              if (!healthEditing) {
+                setHealthMsg(null);
+                setHealthErr(null);
+                setHealthEditing(true);
+                return;
+              }
+              const splitItems = (s: string) =>
+                s
+                  .split(/[、,，]/)
+                  .map((v) => v.trim())
+                  .filter(Boolean);
+              const nextConditions = splitItems(healthConditionsText);
+              const nextAllergies = splitItems(allergiesText);
+              try {
+                const data: any = await updateMe({
+                  activity_level: activityLevel,
+                  health_conditions: nextConditions,
+                  allergies: nextAllergies,
+                });
+                setUserInfo((prev) => ({
+                  ...prev,
+                  activity: data.activity_level || prev.activity,
+                }));
+                setActivityLevel(data.activity_level || activityLevel);
+                setHealthConditionsText((data.health_conditions || nextConditions).join("、"));
+                setAllergiesText((data.allergies || nextAllergies).join("、"));
+                setHealthMsg("健康信息已保存");
+                setHealthErr(null);
+                setHealthEditing(false);
+              } catch (e: any) {
+                setHealthErr(String(e?.message || "健康信息保存失败"));
+              }
+            }}
+            className="text-sm text-green-600 hover:text-green-700"
+          >
+            {healthEditing ? "保存" : "修改"}
+          </button>
+        </div>
         <div className="space-y-4">
           <div>
+            <div className="text-sm text-gray-500 mb-2">活动强度</div>
+            {healthEditing ? (
+              <select
+                value={activityLevel}
+                onChange={(e) => setActivityLevel(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              >
+                {["久坐", "轻度活动", "中度活动", "高度活动", "极度活动"].map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">{activityLevel}</span>
+            )}
+          </div>
+          <div>
             <div className="text-sm text-gray-500 mb-2">健康状况</div>
-            <div className="flex flex-wrap gap-2">
-              {healthConditions.map((c) => (
-                <span key={c} className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">{c}</span>
-              ))}
-              <button className="px-3 py-1 border border-dashed border-gray-300 text-gray-400 rounded-full text-sm hover:border-green-300 hover:text-green-600 transition-colors">
-                + 添加
-              </button>
-            </div>
+            {healthEditing ? (
+              <input
+                value={healthConditionsText}
+                onChange={(e) => setHealthConditionsText(e.target.value)}
+                placeholder="多个项目用 逗号 或 顿号 分隔"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(healthConditionsText ? healthConditionsText.split(/[、,，]/).map((v) => v.trim()).filter(Boolean) : ["无特殊健康状况"]).map((c) => (
+                  <span key={c} className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">{c}</span>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <div className="text-sm text-gray-500 mb-2 flex items-center gap-1">
               <AlertCircle size={12} className="text-orange-400" /> 过敏史
             </div>
-            <div className="flex flex-wrap gap-2">
-              {allergies.map((a) => (
-                <span key={a} className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">{a}</span>
-              ))}
-              <button className="px-3 py-1 border border-dashed border-gray-300 text-gray-400 rounded-full text-sm hover:border-orange-300 hover:text-orange-600 transition-colors">
-                + 添加过敏原
-              </button>
-            </div>
+            {healthEditing ? (
+              <input
+                value={allergiesText}
+                onChange={(e) => setAllergiesText(e.target.value)}
+                placeholder="多个项目用 逗号 或 顿号 分隔"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(allergiesText ? allergiesText.split(/[、,，]/).map((v) => v.trim()).filter(Boolean) : ["无已知过敏"]).map((a) => (
+                  <span key={a} className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">{a}</span>
+                ))}
+              </div>
+            )}
           </div>
+          {healthMsg && <div className="text-sm text-green-600">{healthMsg}</div>}
+          {healthErr && <div className="text-sm text-red-500">{healthErr}</div>}
         </div>
       </div>
 
@@ -412,6 +606,110 @@ export function ProfilePage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {activeSection === "security" && (
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 space-y-5">
+          <h3 className="text-gray-700">账户安全</h3>
+
+          <div className="space-y-3">
+            <div className="text-sm text-gray-600">绑定手机号/邮箱</div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <input
+                value={bindPhone}
+                onChange={(e) => setBindPhone(e.target.value)}
+                placeholder="手机号"
+                className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+              <input
+                value={bindEmail}
+                onChange={(e) => setBindEmail(e.target.value)}
+                placeholder="邮箱"
+                className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+            </div>
+            <button
+              onClick={async () => {
+                setSecurityMsg(null);
+                setSecurityErr(null);
+                try {
+                  const data: any = await bindContact({
+                    phone: bindPhone.trim() || undefined,
+                    email: bindEmail.trim() || undefined,
+                  });
+                  setUserInfo((prev) => ({
+                    ...prev,
+                    phone: data.phone ? data.phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2") : prev.phone,
+                    email: data.email || prev.email,
+                  }));
+                  setBindPhone(data.phone || bindPhone.trim());
+                  setBindEmail(data.email || bindEmail.trim());
+                  setSecurityMsg("联系方式绑定成功");
+                } catch (e: any) {
+                  setSecurityErr(String(e?.message || "联系方式绑定失败"));
+                }
+              }}
+              className="px-4 py-2 bg-green-500 text-white rounded-xl text-sm hover:bg-green-600"
+            >
+              保存联系方式
+            </button>
+          </div>
+
+          <div className="space-y-3 pt-3 border-t border-gray-100">
+            <div className="text-sm text-gray-600">修改密码</div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <input
+                type="password"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="旧密码"
+                className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="新密码（至少6位）"
+                className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="确认新密码"
+                className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-green-400"
+              />
+            </div>
+            <button
+              onClick={async () => {
+                setSecurityMsg(null);
+                setSecurityErr(null);
+                if (newPassword !== confirmPassword) {
+                  setSecurityErr("两次输入的新密码不一致");
+                  return;
+                }
+                try {
+                  await updatePassword({
+                    old_password: oldPassword,
+                    new_password: newPassword,
+                  });
+                  setOldPassword("");
+                  setNewPassword("");
+                  setConfirmPassword("");
+                  setSecurityMsg("密码修改成功");
+                } catch (e: any) {
+                  setSecurityErr(String(e?.message || "密码修改失败"));
+                }
+              }}
+              className="px-4 py-2 bg-green-500 text-white rounded-xl text-sm hover:bg-green-600"
+            >
+              修改密码
+            </button>
+          </div>
+
+          {securityMsg && <div className="text-sm text-green-600">{securityMsg}</div>}
+          {securityErr && <div className="text-sm text-red-500">{securityErr}</div>}
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Camera,
   Search,
@@ -16,7 +16,16 @@ import {
   AlertTriangle,
   Zap,
 } from "lucide-react";
-import { addRecord, searchFoods } from "../lib/api";
+import {
+  addRecord,
+  copyRecordsToToday,
+  deleteRecordItem,
+  getFoodByBarcode,
+  getRecordsByDate,
+  recognizeFoodImage,
+  searchFoods,
+  updateRecordItem,
+} from "../lib/api";
 
 type Tab = "scan" | "photo" | "search" | "history";
 
@@ -33,12 +42,35 @@ type FoodResult = {
   img: string;
 };
 
-const historyFoods = [
-  { id: 1, name: "鸡胸肉", amount: "150g", cal: 248, date: "今天", img: "https://images.unsplash.com/photo-1762631383378-115f2d4cbe07?w=60&h=60&fit=crop" },
-  { id: 2, name: "燕麦粥", amount: "200g", cal: 142, date: "今天", img: "https://images.unsplash.com/photo-1645545532196-e867a6ed4ad9?w=60&h=60&fit=crop" },
-  { id: 3, name: "蒸蛋", amount: "100g", cal: 82, date: "昨天", img: "https://images.unsplash.com/photo-1676300186673-615bcc8d5d68?w=60&h=60&fit=crop" },
-  { id: 4, name: "紫薯", amount: "150g", cal: 136, date: "昨天", img: "https://images.unsplash.com/photo-1642339800099-921df1a0a958?w=60&h=60&fit=crop" },
-];
+type ApiFood = {
+  id: number;
+  name: string;
+  brand?: string | null;
+  calories?: number;
+  protein?: number;
+  fat?: number;
+  carbs?: number;
+  health_score?: number;
+  image?: string | null;
+};
+
+const DEFAULT_FOOD_IMAGE =
+  "https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=200&h=200&fit=crop";
+
+function mapFoodFromApi(f: ApiFood): FoodResult {
+  return {
+    id: f.id,
+    name: f.name,
+    brand: f.brand || "",
+    cal: Number(f.calories || 0),
+    protein: Number(f.protein || 0),
+    fat: Number(f.fat || 0),
+    carbs: Number(f.carbs || 0),
+    per: "100g",
+    score: Number(f.health_score ?? 7),
+    img: f.image || DEFAULT_FOOD_IMAGE,
+  };
+}
 
 const scoreColor = (s: number) =>
   s >= 8 ? "text-green-600 bg-green-50 border-green-200" :
@@ -223,12 +255,26 @@ function FoodDetailModal({ food, onClose, onAdd }: {
 }
 
 export function RecordPage() {
+  const today = new Date().toISOString().slice(0, 10);
   const [tab, setTab] = useState<Tab>("search");
   const [query, setQuery] = useState("");
   const [selectedFood, setSelectedFood] = useState<FoodResult | null>(null);
   const [addedIds, setAddedIds] = useState<number[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<FoodResult[]>([]);
+  const [historyDate, setHistoryDate] = useState(today);
+  const [historyData, setHistoryData] = useState<any | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMsg, setHistoryMsg] = useState<string | null>(null);
+  const [historyErr, setHistoryErr] = useState<string | null>(null);
+  const [amountEdits, setAmountEdits] = useState<Record<number, string>>({});
+  const [scanCode, setScanCode] = useState("");
+  const [scanLoading, setScanLoading] = useState(false);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [recognizeErr, setRecognizeErr] = useState<string | null>(null);
+  const [recognizeMsg, setRecognizeMsg] = useState<string | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSearch = (q: string) => {
     setQuery(q);
@@ -240,18 +286,7 @@ export function RecordPage() {
     searchFoods(query || "")
       .then((data: any[]) => {
         if (!active) return;
-        const mapped = data.map((f) => ({
-          id: f.id,
-          name: f.name,
-          brand: f.brand || "",
-          cal: f.calories,
-          protein: f.protein,
-          fat: f.fat,
-          carbs: f.carbs,
-          per: "100g",
-          score: f.health_score ?? 7,
-          img: f.image,
-        }));
+        const mapped = data.map((f) => mapFoodFromApi(f));
         setSearchResults(mapped);
       })
       .finally(() => {
@@ -262,7 +297,78 @@ export function RecordPage() {
     };
   }, [query]);
 
+  useEffect(() => {
+    if (tab !== "history") return;
+    let active = true;
+    setHistoryLoading(true);
+    setHistoryErr(null);
+    getRecordsByDate(historyDate)
+      .then((data: any) => {
+        if (!active) return;
+        setHistoryData(data);
+      })
+      .catch((e: any) => {
+        if (!active) return;
+        setHistoryErr(String(e?.message || "历史记录加载失败"));
+        setHistoryData({ meals: [] });
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab, historyDate]);
+
+  useEffect(() => {
+    setRecognizeErr(null);
+    setRecognizeMsg(null);
+  }, [tab]);
+
   const filteredResults = searchResults;
+
+  const openFoodDetail = (food: ApiFood) => {
+    setSelectedFood(mapFoodFromApi(food));
+  };
+
+  const handleBarcodeRecognize = async () => {
+    const code = scanCode.trim();
+    if (!code) {
+      setRecognizeErr("请输入条码后再识别");
+      setRecognizeMsg(null);
+      return;
+    }
+    setScanLoading(true);
+    setRecognizeErr(null);
+    try {
+      const food: any = await getFoodByBarcode(code);
+      openFoodDetail(food);
+      setRecognizeMsg(`识别成功：${food.name}`);
+    } catch (e: any) {
+      setRecognizeErr(String(e?.message || "条码识别失败"));
+      setRecognizeMsg(null);
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const handleImageSelect = async (file?: File | null) => {
+    if (!file) return;
+    setPhotoLoading(true);
+    setRecognizeErr(null);
+    try {
+      const food: any = await recognizeFoodImage(file);
+      openFoodDetail(food);
+      setRecognizeMsg(`识别成功：${food.name}`);
+    } catch (e: any) {
+      setRecognizeErr(String(e?.message || "图片识别失败"));
+      setRecognizeMsg(null);
+    } finally {
+      setPhotoLoading(false);
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
 
   const handleAdd = async (amount: number, meal: string) => {
     if (!selectedFood) return;
@@ -283,11 +389,29 @@ export function RecordPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        data-testid="camera-file-input"
+        onChange={(e) => { void handleImageSelect(e.target.files?.[0]); }}
+      />
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        data-testid="upload-file-input"
+        onChange={(e) => { void handleImageSelect(e.target.files?.[0]); }}
+      />
       {/* Tabs */}
       <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
         {tabs.map((t) => (
           <button
             key={t.id}
+            data-testid={`tab-${t.id}`}
             onClick={() => setTab(t.id)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm transition-all ${
               tab === t.id ? "bg-white text-green-700 shadow-sm font-medium" : "text-gray-500"
@@ -319,17 +443,32 @@ export function RecordPage() {
             </div>
             <div className="p-4 text-center">
               <p className="text-sm text-gray-500 mb-3">支持商品条形码、二维码扫描</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button className="py-2.5 bg-green-500 text-white rounded-xl text-sm hover:bg-green-600 transition-colors">
-                  开始扫描
+              <div className="space-y-3">
+                <input
+                  data-testid="scan-code-input"
+                  type="text"
+                  value={scanCode}
+                  onChange={(e) => setScanCode(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="输入条形码，例如 690000001"
+                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 outline-none focus:border-green-400"
+                />
+                <button
+                  data-testid="scan-recognize-btn"
+                  onClick={() => { void handleBarcodeRecognize(); }}
+                  disabled={scanLoading}
+                  className="w-full py-2.5 bg-green-500 text-white rounded-xl text-sm hover:bg-green-600 transition-colors disabled:bg-green-300"
+                >
+                  {scanLoading ? "识别中..." : "识别条码"}
                 </button>
                 <button
                   onClick={() => setTab("photo")}
-                  className="py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50 transition-colors"
+                  className="w-full py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50 transition-colors"
                 >
                   上传图片
                 </button>
               </div>
+              {recognizeMsg && <div className="mt-3 text-xs text-green-600">{recognizeMsg}</div>}
+              {recognizeErr && <div className="mt-3 text-xs text-red-500">{recognizeErr}</div>}
             </div>
           </div>
         </div>
@@ -345,13 +484,25 @@ export function RecordPage() {
             <h3 className="text-gray-700 font-medium mb-1">拍照识别食物</h3>
             <p className="text-sm text-gray-500 mb-6">拍摄食物照片或配料表，AI 自动识别营养成分</p>
             <div className="grid grid-cols-2 gap-3">
-              <button className="py-3 bg-green-500 text-white rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-green-600 transition-colors">
-                <Camera size={16} /> 拍照识别
+              <button
+                data-testid="photo-camera-btn"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={photoLoading}
+                className="py-3 bg-green-500 text-white rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-green-600 transition-colors disabled:bg-green-300"
+              >
+                <Camera size={16} /> {photoLoading ? "识别中..." : "拍照识别"}
               </button>
-              <button className="py-3 border border-gray-200 text-gray-600 rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors">
+              <button
+                data-testid="photo-upload-btn"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={photoLoading}
+                className="py-3 border border-gray-200 text-gray-600 rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors disabled:text-gray-400 disabled:border-gray-100"
+              >
                 <Upload size={16} /> 上传图片
               </button>
             </div>
+            {recognizeMsg && <div className="mt-3 text-xs text-green-600">{recognizeMsg}</div>}
+            {recognizeErr && <div className="mt-3 text-xs text-red-500">{recognizeErr}</div>}
           </div>
 
           {/* Demo result */}
@@ -461,35 +612,116 @@ export function RecordPage() {
       {tab === "history" && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-            <h3 className="text-gray-700 font-medium mb-4 flex items-center gap-2">
-              <Clock size={16} className="text-green-500" /> 最近食用
-            </h3>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h3 className="text-gray-700 font-medium flex items-center gap-2">
+                <Clock size={16} className="text-green-500" /> 历史记录
+              </h3>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={historyDate}
+                  onChange={(e) => setHistoryDate(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700"
+                />
+                <button
+                  onClick={async () => {
+                    if (historyDate === today) {
+                      setHistoryMsg("当前已是今天，无需复制");
+                      setHistoryErr(null);
+                      return;
+                    }
+                    try {
+                      await copyRecordsToToday(historyDate);
+                      setHistoryMsg("已复制到今天");
+                      setHistoryErr(null);
+                    } catch (e: any) {
+                      setHistoryErr(String(e?.message || "复制失败"));
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs hover:bg-green-600"
+                >
+                  复制到今天
+                </button>
+              </div>
+            </div>
+
+            {historyLoading && <div className="text-sm text-gray-500">正在加载...</div>}
+            {!historyLoading && (historyData?.meals || []).length === 0 && (
+              <div className="text-sm text-gray-500">该日期暂无记录</div>
+            )}
+
             <div className="space-y-3">
-              {historyFoods.map((food) => (
-                <div key={food.id} className="flex items-center gap-3">
-                  <img src={food.img} alt={food.name} className="w-12 h-12 rounded-xl object-cover" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-gray-800">{food.name}</div>
-                    <div className="text-xs text-gray-400">{food.date} · {food.amount}</div>
+              {(historyData?.meals || []).map((meal: any, idx: number) => (
+                <div key={`${meal.meal_type}-${idx}`} className="border border-gray-100 rounded-xl p-3">
+                  <div className="text-sm font-medium text-gray-700 mb-2">{meal.meal_type}</div>
+                  <div className="space-y-2">
+                    {(meal.foods || []).map((food: any) => {
+                      const itemId = Number(food.record_item_id || 0);
+                      const currentAmount = Number(String(food.amount || "0").replace(/[^\d.]/g, "")) || 0;
+                      const editValue = amountEdits[itemId] ?? String(currentAmount);
+                      return (
+                        <div key={`${itemId}-${food.id}`} className="flex items-center gap-2">
+                          <img src={food.image} alt={food.name} className="w-10 h-10 rounded-lg object-cover" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-gray-800 truncate">{food.name}</div>
+                            <div className="text-xs text-gray-400">{food.calories} kcal</div>
+                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={editValue}
+                            onChange={(e) => {
+                              const raw = e.target.value.trim();
+                              if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+                              setAmountEdits((prev) => ({ ...prev, [itemId]: raw }));
+                            }}
+                            className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-center"
+                          />
+                          <span className="text-xs text-gray-500">g</span>
+                          <button
+                            onClick={async () => {
+                              const nextAmount = Number(amountEdits[itemId] ?? currentAmount);
+                              if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
+                                setHistoryErr("份量必须大于0");
+                                return;
+                              }
+                              try {
+                                const data: any = await updateRecordItem(itemId, nextAmount);
+                                setHistoryData(data);
+                                setHistoryMsg("份量已更新");
+                                setHistoryErr(null);
+                              } catch (e: any) {
+                                setHistoryErr(String(e?.message || "更新失败"));
+                              }
+                            }}
+                            className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs hover:bg-green-200"
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const data: any = await deleteRecordItem(itemId);
+                                setHistoryData(data);
+                                setHistoryMsg("记录已删除");
+                                setHistoryErr(null);
+                              } catch (e: any) {
+                                setHistoryErr(String(e?.message || "删除失败"));
+                              }
+                            }}
+                            className="px-2 py-1 bg-red-100 text-red-600 rounded text-xs hover:bg-red-200"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="text-sm text-gray-500">{food.cal} kcal</div>
-                  <button
-                    onClick={() => setAddedIds([...addedIds, food.id])}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors flex-shrink-0 ${
-                      addedIds.includes(food.id)
-                        ? "bg-green-100"
-                        : "bg-gray-100 hover:bg-green-100"
-                    }`}
-                  >
-                    {addedIds.includes(food.id) ? (
-                      <Check size={14} className="text-green-600" />
-                    ) : (
-                      <Plus size={14} className="text-gray-500" />
-                    )}
-                  </button>
                 </div>
               ))}
             </div>
+            {historyMsg && <div className="mt-3 text-xs text-green-600">{historyMsg}</div>}
+            {historyErr && <div className="mt-3 text-xs text-red-500">{historyErr}</div>}
           </div>
 
           {/* Favorites */}
