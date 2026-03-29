@@ -1,12 +1,23 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import puppeteer from "puppeteer";
 
 const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:5173";
-const IMAGE_FILE =
-  process.env.IMAGE_FILE ||
-  path.resolve(process.cwd(), "mvp-login-fail.png");
+const DEFAULT_IMAGE_FILE = path.resolve(process.cwd(), "mvp-login-fail.png");
+
+function ensureImageFile() {
+  const target = process.env.IMAGE_FILE || DEFAULT_IMAGE_FILE;
+  if (fs.existsSync(target)) return target;
+  const tmpFile = path.join(os.tmpdir(), "nm-sprint-c-upload.png");
+  const png1x1 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBgNf4x1EAAAAASUVORK5CYII=";
+  fs.writeFileSync(tmpFile, Buffer.from(png1x1, "base64"));
+  return tmpFile;
+}
 
 async function run() {
+  const imageFile = ensureImageFile();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const browser = await puppeteer.launch({ headless: "new" });
   const page = await browser.newPage();
@@ -43,6 +54,8 @@ async function run() {
     await page.goto(`${BASE_URL}/record`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="tab-scan"]', { timeout: 5000 });
     await clickByTestId("tab-scan");
+    const hasCameraBtn = await page.$('[data-testid="scan-camera-btn"]');
+    add("扫码页摄像头入口存在", Boolean(hasCameraBtn));
     const switched = await page.$('[data-testid="scan-code-input"]');
     await sleep(300);
     await page.click('[data-testid="scan-code-input"]', { clickCount: 3 });
@@ -65,9 +78,9 @@ async function run() {
     await page.waitForSelector('[data-testid="upload-file-input"]', { timeout: 3000 });
     const input = await page.$('[data-testid="upload-file-input"]');
     if (!input) throw new Error("未找到上传输入框");
-    await input.uploadFile(IMAGE_FILE);
+    await input.uploadFile(imageFile);
     await page.waitForSelector('[data-testid="add-food-button"]', { timeout: 5000 });
-    add("上传图片识别可打开食物详情", true, path.basename(IMAGE_FILE));
+    add("上传图片识别可打开食物详情", true, path.basename(imageFile));
   } catch (e) {
     add("上传图片识别可打开食物详情", false, String(e));
   }

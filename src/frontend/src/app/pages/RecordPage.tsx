@@ -54,6 +54,18 @@ type ApiFood = {
   image?: string | null;
 };
 
+type BarcodeDetectorCtor = {
+  new (options?: { formats?: string[] }): {
+    detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>>;
+  };
+};
+
+type ScanRuntime = {
+  stream: MediaStream | null;
+  timer: number | null;
+  busy: boolean;
+};
+
 const DEFAULT_FOOD_IMAGE =
   "https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=200&h=200&fit=crop";
 
@@ -273,8 +285,12 @@ export function RecordPage() {
   const [photoLoading, setPhotoLoading] = useState(false);
   const [recognizeErr, setRecognizeErr] = useState<string | null>(null);
   const [recognizeMsg, setRecognizeMsg] = useState<string | null>(null);
+  const [cameraScanning, setCameraScanning] = useState(false);
+  const [cameraSupport, setCameraSupport] = useState(true);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const scanVideoRef = useRef<HTMLVideoElement | null>(null);
+  const scanRuntimeRef = useRef<ScanRuntime>({ stream: null, timer: null, busy: false });
 
   const handleSearch = (q: string) => {
     setQuery(q);
@@ -325,14 +341,22 @@ export function RecordPage() {
     setRecognizeMsg(null);
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== "scan" && cameraScanning) {
+      stopCameraScan();
+    }
+  }, [tab, cameraScanning]);
+
+  useEffect(() => () => stopCameraScan(), []);
+
   const filteredResults = searchResults;
 
   const openFoodDetail = (food: ApiFood) => {
     setSelectedFood(mapFoodFromApi(food));
   };
 
-  const handleBarcodeRecognize = async () => {
-    const code = scanCode.trim();
+  const handleBarcodeRecognizeByCode = async (rawCode: string) => {
+    const code = rawCode.trim();
     if (!code) {
       setRecognizeErr("请输入条码后再识别");
       setRecognizeMsg(null);
@@ -349,6 +373,77 @@ export function RecordPage() {
       setRecognizeMsg(null);
     } finally {
       setScanLoading(false);
+    }
+  };
+
+  const handleBarcodeRecognize = async () => handleBarcodeRecognizeByCode(scanCode);
+
+  const stopCameraScan = () => {
+    const rt = scanRuntimeRef.current;
+    if (rt.timer !== null) {
+      window.clearInterval(rt.timer);
+      rt.timer = null;
+    }
+    if (rt.stream) {
+      rt.stream.getTracks().forEach((track) => track.stop());
+      rt.stream = null;
+    }
+    rt.busy = false;
+    if (scanVideoRef.current) {
+      scanVideoRef.current.srcObject = null;
+    }
+    setCameraScanning(false);
+  };
+
+  const startCameraScan = async () => {
+    if (cameraScanning) return;
+    setRecognizeErr(null);
+    setRecognizeMsg(null);
+    const detectorCtor = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+    if (!detectorCtor) {
+      setCameraSupport(false);
+      setRecognizeErr("当前浏览器不支持实时扫码，请手动输入条码或上传图片");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      const video = scanVideoRef.current;
+      if (!video) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      video.srcObject = stream;
+      await video.play();
+      const detector = new detectorCtor({
+        formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
+      });
+      scanRuntimeRef.current.stream = stream;
+      setCameraSupport(true);
+      setCameraScanning(true);
+      scanRuntimeRef.current.timer = window.setInterval(async () => {
+        const rt = scanRuntimeRef.current;
+        if (rt.busy || !scanVideoRef.current) return;
+        rt.busy = true;
+        try {
+          const codes = await detector.detect(scanVideoRef.current);
+          const value = String(codes?.[0]?.rawValue || "").trim();
+          if (value) {
+            setScanCode(value);
+            stopCameraScan();
+            void handleBarcodeRecognizeByCode(value);
+          }
+        } catch {
+          // 识别失败时静默重试
+        } finally {
+          rt.busy = false;
+        }
+      }, 500);
+    } catch (e: any) {
+      stopCameraScan();
+      setRecognizeErr(String(e?.message || "无法访问摄像头"));
     }
   };
 
@@ -427,23 +522,44 @@ export function RecordPage() {
       {tab === "scan" && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-            <div className="relative bg-gray-900 aspect-square max-h-80 flex items-center justify-center">
-              <div className="relative">
-                <div className="w-48 h-48 border-2 border-green-400 rounded-2xl relative">
-                  <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-green-400 rounded-tl" />
-                  <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-green-400 rounded-tr" />
-                  <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-green-400 rounded-bl" />
-                  <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-green-400 rounded-br" />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-full h-0.5 bg-green-400 animate-pulse" />
+            <div className="relative bg-gray-900 aspect-square max-h-80 overflow-hidden">
+              {cameraScanning ? (
+                <video
+                  ref={scanVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center">
+                  <div className="relative">
+                    <div className="w-48 h-48 border-2 border-green-400 rounded-2xl relative">
+                      <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-green-400 rounded-tl" />
+                      <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-green-400 rounded-tr" />
+                      <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-green-400 rounded-bl" />
+                      <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-green-400 rounded-br" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-full h-0.5 bg-green-400 animate-pulse" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
               <div className="absolute bottom-4 text-gray-300 text-sm">将条形码/二维码对准框内</div>
             </div>
             <div className="p-4 text-center">
               <p className="text-sm text-gray-500 mb-3">支持商品条形码、二维码扫描</p>
               <div className="space-y-3">
+                <button
+                  data-testid="scan-camera-btn"
+                  onClick={() => { void (cameraScanning ? stopCameraScan() : startCameraScan()); }}
+                  className={`w-full py-2.5 rounded-xl text-sm transition-colors ${
+                    cameraScanning ? "bg-gray-200 text-gray-700 hover:bg-gray-300" : "bg-green-500 text-white hover:bg-green-600"
+                  }`}
+                >
+                  {cameraScanning ? "停止扫描" : "开始扫描"}
+                </button>
                 <input
                   data-testid="scan-code-input"
                   type="text"
@@ -455,7 +571,7 @@ export function RecordPage() {
                 <button
                   data-testid="scan-recognize-btn"
                   onClick={() => { void handleBarcodeRecognize(); }}
-                  disabled={scanLoading}
+                  disabled={scanLoading || cameraScanning}
                   className="w-full py-2.5 bg-green-500 text-white rounded-xl text-sm hover:bg-green-600 transition-colors disabled:bg-green-300"
                 >
                   {scanLoading ? "识别中..." : "识别条码"}
@@ -467,6 +583,7 @@ export function RecordPage() {
                   上传图片
                 </button>
               </div>
+              {!cameraSupport && <div className="mt-3 text-xs text-orange-600">当前环境不支持实时扫码，已回退到手动条码识别</div>}
               {recognizeMsg && <div className="mt-3 text-xs text-green-600">{recognizeMsg}</div>}
               {recognizeErr && <div className="mt-3 text-xs text-red-500">{recognizeErr}</div>}
             </div>
