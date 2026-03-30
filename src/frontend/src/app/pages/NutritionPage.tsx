@@ -73,7 +73,10 @@ export function NutritionPage() {
 
   useEffect(() => {
     let active = true;
-    getNutritionSummary()
+    const current = new Date();
+    current.setDate(current.getDate() + dateOffset);
+    const dateStr = current.toISOString().slice(0, 10);
+    getNutritionSummary(dateStr)
       .then((data) => {
         if (active) setSummary(data);
       })
@@ -83,7 +86,7 @@ export function NutritionPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [dateOffset]);
 
   const dateLabel = dateOffset === 0 ? "今天" : dateOffset === -1 ? "昨天" : `${Math.abs(dateOffset)}天前`;
 
@@ -105,10 +108,10 @@ export function NutritionPage() {
     ? nutrients
     : nutrients.filter((n) => n.category === selectedCat);
 
-  const issues = nutrients.filter((n) => {
-    const pct = (n.consumed / n.target) * 100;
-    return pct < 70 || pct > 110;
-  });
+  const reminders = summary?.reminders || [];
+  const additiveStats = summary?.additive_stats || [];
+  const advice = summary?.advice || [];
+  const populationAssessments = summary?.population_assessments || [];
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -190,29 +193,26 @@ export function NutritionPage() {
         </div>
       </div>
 
-      {/* Issues summary */}
-      {issues.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-          <div className="flex items-center gap-2 text-amber-700 font-medium mb-3">
-            <AlertTriangle size={16} /> 今日营养提醒 ({issues.length} 项)
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {issues.map((n) => {
-              const pct = Math.round((n.consumed / n.target) * 100);
-              const isLow = pct < 70;
-              return (
-                <div key={n.name} className={`flex items-center gap-2 p-2.5 rounded-xl ${isLow ? "bg-amber-100" : "bg-red-50"}`}>
-                  {isLow ? <TrendingDown size={14} className="text-amber-600" /> : <TrendingUp size={14} className="text-red-500" />}
-                  <div>
-                    <div className="text-sm font-medium text-gray-800">{n.name}</div>
-                    <div className="text-xs text-gray-500">{pct}% · {isLow ? "建议增加" : "建议控制"}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {/* Unified Reminders */}
+      <div className={`${reminders.some((r: any) => r.type === "warn") ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"} border rounded-2xl p-5`}>
+        <div className={`${reminders.some((r: any) => r.type === "warn") ? "text-amber-700" : "text-green-700"} flex items-center gap-2 font-medium mb-3`}>
+          <AlertTriangle size={16} /> 今日营养提醒 ({reminders.length} 项)
         </div>
-      )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-2">
+          {reminders.map((r: any, idx: number) => {
+            const warn = r.type === "warn";
+            return (
+              <div key={`${r.text}-${idx}`} className={`flex items-center gap-2 p-2.5 rounded-xl ${warn ? "bg-red-50" : "bg-green-100"}`}>
+                {warn ? <TrendingUp size={14} className="text-red-500" /> : <CheckCircle size={14} className="text-green-600" />}
+                <div className="text-sm text-gray-800">{r.text}</div>
+              </div>
+            );
+          })}
+          {reminders.length === 0 && (
+            <div className="text-sm text-gray-600 bg-gray-100 rounded-xl p-2.5">今日暂无提醒</div>
+          )}
+        </div>
+      </div>
 
       {/* Health Score */}
       {summary?.health_score && (
@@ -231,6 +231,36 @@ export function NutritionPage() {
                 <div className="text-xs text-gray-500 w-12 text-right">{d.score}/{d.max}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {populationAssessments.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-gray-700">特定人群评估</h3>
+            <div className="text-xs text-gray-500">减脂 / 增肌 / 糖尿病 / 高血压 / 过敏</div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {populationAssessments.map((item: any) => {
+              const status = String(item?.status || "");
+              const tone =
+                status === "不建议"
+                  ? "bg-red-50 border-red-200 text-red-700"
+                  : status === "谨慎"
+                    ? "bg-amber-50 border-amber-200 text-amber-700"
+                    : "bg-green-50 border-green-200 text-green-700";
+              return (
+                <div key={String(item?.key || item?.name)} className={`rounded-xl border p-3 ${tone}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-sm font-semibold">{item?.name}</div>
+                    <div className="text-xs font-medium">{Number(item?.score || 0).toFixed(1)}</div>
+                  </div>
+                  <div className="text-xs mb-1">{item?.level} · {item?.status}</div>
+                  <div className="text-xs opacity-90">{item?.highlights?.[0] || "暂无评估说明"}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -272,24 +302,26 @@ export function NutritionPage() {
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
         <h3 className="text-gray-700 mb-4">添加剂统计</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[
-            { name: "添加糖", val: 18, max: 50, unit: "g", color: "bg-pink-100 text-pink-700 border-pink-200" },
-            { name: "食盐", val: 3.6, max: 5, unit: "g", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
-            { name: "油脂", val: 28, max: 50, unit: "g", color: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-            { name: "食品添加剂", val: 4, max: 10, unit: "种", color: "bg-orange-100 text-orange-700 border-orange-200" },
-          ].map((item) => (
-            <div key={item.name} className={`p-4 rounded-xl border ${item.color}`}>
+          {additiveStats.map((item: any) => {
+            const ratio = item.max > 0 ? item.val / item.max : 0;
+            const color = ratio > 1
+              ? "bg-red-100 text-red-700 border-red-200"
+              : ratio > 0.7
+                ? "bg-amber-100 text-amber-700 border-amber-200"
+                : "bg-green-100 text-green-700 border-green-200";
+            return (
+            <div key={item.name} className={`p-4 rounded-xl border ${color}`}>
               <div className="text-sm font-medium mb-1">{item.name}</div>
               <div className="text-xl font-bold">{item.val} <span className="text-sm font-normal">{item.unit}</span></div>
               <div className="text-xs opacity-70 mt-0.5">限量 {item.max}{item.unit}</div>
               <div className="h-1.5 bg-white/50 rounded-full mt-2 overflow-hidden">
                 <div
                   className="h-full bg-current rounded-full opacity-60"
-                  style={{ width: `${(item.val / item.max) * 100}%` }}
+                  style={{ width: `${Math.min((item.val / (item.max || 1)) * 100, 100)}%` }}
                 />
               </div>
             </div>
-          ))}
+          );})}
         </div>
       </div>
 
@@ -300,12 +332,12 @@ export function NutritionPage() {
             <CheckCircle size={20} className="text-white" />
           </div>
           <div>
-            <h3 className="font-semibold mb-2">今日营养建议（减脂目标）</h3>
+            <h3 className="font-semibold mb-2">今日营养建议</h3>
             <ul className="space-y-1.5 text-green-100 text-sm">
-              <li>• 蛋白质摄入仅达65%，晚餐建议选择鸡胸肉或豆腐等高蛋白食物</li>
-              <li>• 热量还剩530 kcal，可安排一顿适量晚餐</li>
-              <li>• 维生素D不足，建议适当日晒或补充营养剂</li>
-              <li>• 整体饮食质量良好，继续保持 👍</li>
+              {advice.map((t: string, idx: number) => (
+                <li key={`${idx}-${t}`}>• {t}</li>
+              ))}
+              {advice.length === 0 && <li>• 暂无建议</li>}
             </ul>
           </div>
         </div>

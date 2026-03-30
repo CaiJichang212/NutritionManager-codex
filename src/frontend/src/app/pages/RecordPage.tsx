@@ -20,6 +20,7 @@ import {
   addRecord,
   copyRecordsToToday,
   deleteRecordItem,
+  getFood,
   getFoodByBarcode,
   getRecordsByDate,
   recognizeFoodImage,
@@ -40,6 +41,31 @@ type FoodResult = {
   per: string;
   score: number;
   img: string;
+  allergens: string[];
+  allergenRiskLevel: string;
+  allergenAlerts: string[];
+  populationAssessments: PopulationAssessment[];
+  replacementRecommendations: AlternativeRecommendation[];
+};
+
+type PopulationAssessment = {
+  key: string;
+  name: string;
+  score: number;
+  level: string;
+  status: string;
+  highlights: string[];
+};
+
+type AlternativeRecommendation = {
+  id: number;
+  name: string;
+  brand?: string;
+  category?: string;
+  image?: string;
+  health_score: number;
+  goal_score: number;
+  reason: string;
 };
 
 type ApiFood = {
@@ -52,6 +78,11 @@ type ApiFood = {
   carbs?: number;
   health_score?: number;
   image?: string | null;
+  allergens?: string[] | null;
+  allergen_risk_level?: string | null;
+  allergen_alerts?: string[] | null;
+  population_assessments?: PopulationAssessment[] | null;
+  replacement_recommendations?: AlternativeRecommendation[] | null;
 };
 
 type BarcodeDetectorCtor = {
@@ -81,6 +112,11 @@ function mapFoodFromApi(f: ApiFood): FoodResult {
     per: "100g",
     score: Number(f.health_score ?? 7),
     img: f.image || DEFAULT_FOOD_IMAGE,
+    allergens: Array.isArray(f.allergens) ? f.allergens : [],
+    allergenRiskLevel: String(f.allergen_risk_level || "none"),
+    allergenAlerts: Array.isArray(f.allergen_alerts) ? f.allergen_alerts : [],
+    populationAssessments: Array.isArray(f.population_assessments) ? f.population_assessments : [],
+    replacementRecommendations: Array.isArray(f.replacement_recommendations) ? f.replacement_recommendations : [],
   };
 }
 
@@ -198,6 +234,104 @@ function FoodDetailModal({ food, onClose, onAdd }: {
             </div>
           )}
 
+          {food.allergenAlerts.length > 0 && (
+            <div
+              className={`rounded-xl p-4 border ${
+                food.allergenRiskLevel === "high"
+                  ? "bg-red-50 border-red-200"
+                  : "bg-amber-50 border-amber-200"
+              }`}
+            >
+              <div
+                className={`flex items-center gap-2 text-sm font-medium mb-2 ${
+                  food.allergenRiskLevel === "high" ? "text-red-700" : "text-amber-700"
+                }`}
+              >
+                <AlertTriangle size={14} /> 过敏原风险提示
+              </div>
+              <div className="space-y-1">
+                {food.allergenAlerts.map((line) => (
+                  <div
+                    key={line}
+                    className={`text-xs ${
+                      food.allergenRiskLevel === "high" ? "text-red-700" : "text-amber-700"
+                    }`}
+                  >
+                    {line}
+                  </div>
+                ))}
+              </div>
+              {food.allergens.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {food.allergens.map((x) => (
+                    <span
+                      key={x}
+                      className={`text-xs px-2 py-0.5 rounded-lg ${
+                        food.allergenRiskLevel === "high"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {x}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {food.populationAssessments.length > 0 && (
+            <div className="bg-gray-50 rounded-xl p-4">
+              <div className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
+                <Shield size={14} className="text-indigo-500" /> 特定人群评估
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {food.populationAssessments.map((p) => {
+                  const tone =
+                    p.status === "不建议"
+                      ? "bg-red-50 border-red-200 text-red-700"
+                      : p.status === "谨慎"
+                        ? "bg-amber-50 border-amber-200 text-amber-700"
+                        : "bg-green-50 border-green-200 text-green-700";
+                  return (
+                    <div key={p.key} className={`rounded-xl border p-3 ${tone}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold">{p.name}</div>
+                        <div className="text-xs font-medium">{p.score}/10 · {p.level}</div>
+                      </div>
+                      <div className="text-xs mt-1.5">{p.status}</div>
+                      {Array.isArray(p.highlights) && p.highlights[0] && (
+                        <div className="text-xs mt-1.5 opacity-90">{p.highlights[0]}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {food.replacementRecommendations.length > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+              <div className="text-sm font-medium text-green-700 mb-3 flex items-center gap-1.5">
+                <Star size={14} /> 更健康替代推荐
+              </div>
+              <div className="space-y-2">
+                {food.replacementRecommendations.map((item) => (
+                  <div key={item.id} className="bg-white border border-green-100 rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-gray-800 font-medium">{item.name}</div>
+                      <div className="text-xs text-green-700 font-semibold">
+                        健康 {item.health_score} · 目标 {item.goal_score}
+                      </div>
+                    </div>
+                    {item.brand && <div className="text-xs text-gray-500 mt-0.5">{item.brand}</div>}
+                    <div className="text-xs text-green-700 mt-1">{item.reason}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Amount & Meal */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -273,6 +407,7 @@ export function RecordPage() {
   const [selectedFood, setSelectedFood] = useState<FoodResult | null>(null);
   const [addedIds, setAddedIds] = useState<number[]>([]);
   const [searching, setSearching] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<FoodResult[]>([]);
   const [historyDate, setHistoryDate] = useState(today);
   const [historyData, setHistoryData] = useState<any | null>(null);
@@ -353,6 +488,18 @@ export function RecordPage() {
 
   const openFoodDetail = (food: ApiFood) => {
     setSelectedFood(mapFoodFromApi(food));
+  };
+
+  const handleSelectFood = async (foodId: number) => {
+    setDetailLoading(true);
+    try {
+      const detail: any = await getFood(foodId);
+      openFoodDetail(detail);
+    } catch (e: any) {
+      setRecognizeErr(String(e?.message || "食物详情加载失败"));
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const handleBarcodeRecognizeByCode = async (rawCode: string) => {
@@ -691,8 +838,8 @@ export function RecordPage() {
               <div
                 key={food.id}
                 data-testid={`food-result-${food.id}`}
-                onClick={() => setSelectedFood(food)}
-                className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-3 cursor-pointer hover:border-green-300 hover:shadow-md transition-all"
+                onClick={() => { void handleSelectFood(food.id); }}
+                className={`bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-3 cursor-pointer hover:border-green-300 hover:shadow-md transition-all ${detailLoading ? "opacity-70" : ""}`}
               >
                 <img src={food.img} alt={food.name} className="w-14 h-14 rounded-xl object-cover" />
                 <div className="flex-1 min-w-0">
@@ -722,6 +869,7 @@ export function RecordPage() {
               </div>
             ))}
           </div>
+          {detailLoading && <div className="text-xs text-gray-500">正在加载食物详情...</div>}
         </div>
       )}
 
@@ -850,7 +998,7 @@ export function RecordPage() {
               {searchResults.slice(0, 4).map((food) => (
                 <div
                   key={food.id}
-                  onClick={() => setSelectedFood(food)}
+                  onClick={() => { void handleSelectFood(food.id); }}
                   className="flex items-center gap-2 p-3 border border-gray-100 rounded-xl cursor-pointer hover:border-green-300 transition-colors"
                 >
                   <img src={food.img} alt={food.name} className="w-10 h-10 rounded-lg object-cover" />
