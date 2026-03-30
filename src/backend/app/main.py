@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .db import Base, engine, SessionLocal
 from .seed import seed_data
-from .routers import auth, users, foods, records, nutrition
+from .routers import auth, users, foods, records, nutrition, ai, reports
 
 app = FastAPI(title="Nutrition Manager MVP API")
 
@@ -39,6 +39,8 @@ app.include_router(users.router)
 app.include_router(foods.router)
 app.include_router(records.router)
 app.include_router(nutrition.router)
+app.include_router(ai.router)
+app.include_router(reports.router)
 
 # 兼容前端可能的 /api 前缀
 app.include_router(auth.router, prefix="/api")
@@ -46,3 +48,5 @@ app.include_router(users.router, prefix="/api")
 app.include_router(foods.router, prefix="/api")
 app.include_router(records.router, prefix="/api")
 app.include_router(nutrition.router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
+app.include_router(reports.router, prefix="/api")

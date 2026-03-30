@@ -1,3 +1,3 @@
-from . import auth, users, foods, records, nutrition
+from . import auth, users, foods, records, nutrition, ai, reports
 
-__all__ = ["auth", "users", "foods", "records", "nutrition"]
+__all__ = ["auth", "users", "foods", "records", "nutrition", "ai", "reports"]

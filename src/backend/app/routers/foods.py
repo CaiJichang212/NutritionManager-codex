@@ -6,14 +6,23 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from ..db import get_db
-from ..models import Food
+from ..models import Food, User
 from ..schemas import FoodOut, FoodDetail
 from ..auth import get_current_user
+from ..services.assessment import (
+    build_food_alternative_recommendations,
+    build_food_population_assessments,
+    resolve_allergen_risk,
+)
+from ..services.recognition import recognize_or_create_food
 
 router = APIRouter(prefix="/foods", tags=["foods"])
 
 
-def _to_food_detail(food: Food) -> FoodDetail:
+def _to_food_detail(food: Food, db: Session, current_user: User | None = None) -> FoodDetail:
+    allergy = resolve_allergen_risk(food, current_user)
+    alternatives = build_food_alternative_recommendations(db, food, current_user) if current_user else []
+
     return FoodDetail(
         id=food.id,
         name=food.name,
@@ -37,7 +46,11 @@ def _to_food_detail(food: Food) -> FoodDetail:
         additives=json.loads(food.additives) if food.additives else [],
         additive_count=food.additive_count,
         ingredients=food.ingredients,
-        allergens=json.loads(food.allergens) if food.allergens else [],
+        allergens=allergy["food_allergens"],
+        allergen_risk_level=allergy["risk_level"],
+        allergen_alerts=allergy["alerts"],
+        population_assessments=build_food_population_assessments(food, current_user),
+        replacement_recommendations=alternatives,
     )
 
 
@@ -50,51 +63,30 @@ def search_foods(q: str = "", db: Session = Depends(get_db), _: object = Depends
 
 
 @router.get("/{food_id}", response_model=FoodDetail)
-def get_food(food_id: int, db: Session = Depends(get_db), _: object = Depends(get_current_user)):
+def get_food(food_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     food = db.query(Food).filter(Food.id == food_id).first()
     if not food:
         raise HTTPException(status_code=404, detail="食物不存在")
-    return _to_food_detail(food)
+    return _to_food_detail(food, db, current_user)
 
 
 @router.get("/barcode/{code}", response_model=FoodDetail)
-def get_food_by_barcode(code: str, db: Session = Depends(get_db), _: object = Depends(get_current_user)):
+def get_food_by_barcode(code: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     food = db.query(Food).filter(Food.barcode == code).first()
     if not food:
         raise HTTPException(status_code=404, detail="条码未识别")
-    return _to_food_detail(food)
+    return _to_food_detail(food, db, current_user)
 
 
 @router.post("/recognize-image", response_model=FoodDetail)
 async def recognize_food_from_image(
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: object = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    # MVP阶段：先用文件名关键词匹配食物，后续替换为真实OCR/图像识别服务。
-    filename = (image.filename or "").lower()
-    await image.read()
-
-    keyword_map = [
-        ("鸡", "鸡"),
-        ("chicken", "鸡"),
-        ("燕麦", "燕麦"),
-        ("oat", "燕麦"),
-        ("西兰花", "西兰花"),
-        ("broccoli", "西兰花"),
-        ("可乐", "可口可乐"),
-        ("cola", "可口可乐"),
-        ("沙拉", "沙拉"),
-        ("salad", "沙拉"),
-    ]
-
-    for key, query_word in keyword_map:
-        if key in filename:
-            matched = db.query(Food).filter(Food.name.contains(query_word)).first()
-            if matched:
-                return _to_food_detail(matched)
-
-    fallback = db.query(Food).first()
-    if not fallback:
-        raise HTTPException(status_code=404, detail="暂无可识别食物数据")
-    return _to_food_detail(fallback)
+    image_bytes = await image.read()
+    try:
+        food = recognize_or_create_food(db, image_bytes=image_bytes, filename=image.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return _to_food_detail(food, db, current_user)

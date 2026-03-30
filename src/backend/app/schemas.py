@@ -117,6 +117,10 @@ class FoodDetail(FoodOut):
     additive_count: Optional[int] = None
     ingredients: Optional[str] = None
     allergens: Optional[List[str]] = None
+    allergen_risk_level: Optional[str] = None
+    allergen_alerts: Optional[List[str]] = None
+    population_assessments: Optional[List[Dict[str, Any]]] = None
+    replacement_recommendations: Optional[List[Dict[str, Any]]] = None
 
 
 class RecordItemCreate(BaseModel):
@@ -180,6 +184,13 @@ class NutritionReminder(BaseModel):
     text: str
 
 
+class AdditiveStat(BaseModel):
+    name: str
+    val: float
+    max: float
+    unit: str
+
+
 class HealthDimension(BaseModel):
     label: str
     score: int
@@ -192,6 +203,15 @@ class HealthScore(BaseModel):
     dimensions: List[HealthDimension]
 
 
+class PopulationAssessment(BaseModel):
+    key: str
+    name: str
+    score: float
+    level: str
+    status: str
+    highlights: List[str]
+
+
 class NutritionSummary(BaseModel):
     date: date
     calorie_consumed: float
@@ -202,6 +222,99 @@ class NutritionSummary(BaseModel):
     macros: List[NutritionMacro]
     focus: List[NutritionFocus]
     reminders: List[NutritionReminder]
+    additive_stats: List[AdditiveStat]
+    advice: List[str]
     health_score: HealthScore
+    population_assessments: List[PopulationAssessment]
     weekly_calories: List[Dict[str, Any]]
     radar: List[Dict[str, Any]]
+
+
+class AIContextItem(BaseModel):
+    key: str
+    label: str
+    value: str
+
+
+class AIContextResponse(BaseModel):
+    greeting: str
+    context_items: List[AIContextItem]
+    quick_questions: List[str]
+
+
+class AIMessage(BaseModel):
+    role: str
+    text: str
+
+
+class AIChatRequest(BaseModel):
+    message: str
+    history: List[AIMessage] = []
+
+
+class AIChatResponse(BaseModel):
+    reply: str
+    citations: List[str] = []
+
+
+class ReportSummaryCard(BaseModel):
+    key: str
+    label: str
+    value: float
+    unit: str = ""
+    target: Optional[float] = None
+    trend: Optional[float] = None
+
+
+class ReportDayMetric(BaseModel):
+    date: date
+    label: str
+    calories: float
+    protein: float
+    fat: float
+    carbs: float
+    score: float
+    target: float
+    has_record: bool
+
+
+class ReportMealItem(BaseModel):
+    meal_type: str
+    calories: float
+    foods: List[str]
+
+
+class CategoryDistributionItem(BaseModel):
+    name: str
+    pct: float
+
+
+class DailyReportResponse(BaseModel):
+    date: date
+    summary_cards: List[ReportSummaryCard]
+    meals: List[ReportMealItem]
+    insights: List[str]
+
+
+class WeeklyReportResponse(BaseModel):
+    start_date: date
+    end_date: date
+    summary_cards: List[ReportSummaryCard]
+    daily_metrics: List[ReportDayMetric]
+    category_distribution: List[CategoryDistributionItem]
+    insights: List[str]
+
+
+class MonthWeekMetric(BaseModel):
+    week_label: str
+    avg_calories: float
+    avg_score: float
+    goal_rate: float
+    record_days: int
+
+
+class MonthlyReportResponse(BaseModel):
+    month: str
+    summary_cards: List[ReportSummaryCard]
+    week_metrics: List[MonthWeekMetric]
+    insights: List[str]
